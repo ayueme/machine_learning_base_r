@@ -1,0 +1,256 @@
+---
+title: "随机森林"
+---
+
+随机森林是一种**集成（ensemble）算法**，属于集成算法中的**袋装法（bagging）**。随机森林可以生成多棵树（决策树）模型，然后将这些树的结果组合起来。
+
+随机森林在建立模型时，会使用自助法（bootstrap）进行重抽样，每次使用大概全部观测的2/3拟合模型，在剩下的1/3的观测中衡量模型性能，这剩下的1/3的数据就被称为**袋外数据（out-of-bag）**，对袋外数据进行的预测就叫**袋外预测（out-of-bag prediction）**，或者叫**样本外预测（out-of-sample prediction）**。这个过程会重复几十或者几百次，最后取平均结果。
+
+随机森林支持分类、回归、生存分析等多种任务类型，而且对数据的要求不严格，即使不进行预处理也能直接使用（但是不能有缺失值）。
+
+目前R语言做随机森林主要就是`ranger`和`randomForest`包。`ranger`的开发者就是`survivalsvm`的开发者。`ranger`是使用`c++`实现的，速度超快。
+
+但是`ranger`的相关文档太少了，而且缺少可视化函数，我们主要介绍`randomForest`。
+
+## 加载R包和数据
+
+演示数据为印第安人糖尿病数据集，这个数据一共有768行，9列，其中`diabetes`是结果变量，为二分类，其余列是预测变量。
+
+```{r,message=FALSE,collapse=TRUE}
+rm(list = ls())
+library(randomForest)
+
+load(file = "datasets/pimadiabetes.rdata")
+
+dim(pimadiabetes)
+str(pimadiabetes)
+```
+
+## 数据划分
+
+划分训练集、测试集。训练集用于建立模型，测试集用于测试模型表现，划分比例为7:3。
+
+```{r}
+# 划分是随机的，设置种子数可以让结果复现
+set.seed(123)
+ind <- sample(1:nrow(pimadiabetes), size = 0.7*nrow(pimadiabetes))
+
+# 去掉真实结果列
+train <- pimadiabetes[ind,]
+test <- pimadiabetes[-ind,]
+
+dim(train)
+dim(test)
+```
+
+## 建立模型
+
+在训练集拟合模型，参数`importance=T`表示需要计算变量的重要性：
+
+```{r}
+set.seed(123)
+fit <- randomForest(diabetes ~ ., data = train, importance = T)
+fit
+```
+
+结果给出了树的数量：500颗；OOB错误率；还给出了混淆矩阵。
+
+## 结果探索
+
+下面是可视化**整体错误率**和**树的数量**的关系，可以看到随着树的数量增加，错误率逐渐降低并渐趋平稳，中间的黑色线条是整体的错误率，上下两条是结果变量中两个类别的错误率。
+
+```{r}
+plot(fit)
+```
+
+查看整体错误率最小时有几棵树：
+
+```{r}
+which.min(fit$err.rate[,1])
+```
+
+查看各个变量的重要性，这里还给出了`mean decrease gini`，数值越大说明变量越重要：
+
+```{r}
+randomForest::importance(fit)
+```
+
+可视化变量重要性：
+
+```{r,fig.height=5,fig.width=10}
+varImpPlot(fit)
+```
+
+**通过变量重要性，大家就可以选择比较重要的变量了。你可以选择前5个，前10个，或者大于所有变量重要性平均值(中位数，百分位数等)的变量等等。**
+
+使用随机森林筛选变量，我专门写过一篇文章：[R语言随机森林筛选变量](https://mp.weixin.qq.com/s/O_sJsgYsd3IaQu5eN5XKiQ)
+
+这个图还可以使用`ggRandomForests`来画，更加好看：
+
+```{r,message=FALSE}
+library(ggRandomForests)
+gg_dta <- gg_vimp(fit)
+plot(gg_dta) #MeanDecreaseGini
+```
+
+或者通过`vip`来画：
+
+```{r,message=FALSE}
+library(vip)
+
+vip(fit) #MeanDecreaseAccuracy
+```
+
+### 提取某一棵树
+
+会给出这颗树在分支时的各种细节，结果太长了，没放出来：
+
+```{r,eval=FALSE}
+getTree(fit, k=2)
+```
+
+### 重新建立模型
+
+选择树的数量为55，并重新建立模型：
+
+```{r}
+fit1 <- randomForest(diabetes ~ ., data = train, ntree = 55)
+fit1
+```
+
+查看测试集效果：
+
+```{r}
+pred <- predict(fit1, newdata = test)
+head(pred)
+```
+
+混淆矩阵：
+
+```{r}
+caret::confusionMatrix(test$diabetes, pred)
+```
+
+准确率0.7576，效果一般。
+
+```{r}
+# 计算预测概率，准备绘制ROC曲线
+pred <- predict(fit1, newdata = test, type = "prob")
+head(pred)
+```
+
+ROC曲线：
+
+```{r,message=FALSE,collapse=TRUE,fig.asp=1}
+library(pROC)
+
+# 提供真实结果，预测概率
+rocc <- roc(test$diabetes, as.matrix(pred)[,1])
+rocc
+
+plot(rocc, 
+     print.auc=TRUE, 
+     auc.polygon=TRUE, 
+     max.auc.polygon=TRUE, 
+     auc.polygon.col="skyblue", 
+     grid=c(0.1, 0.2), 
+     grid.col=c("green", "red"), 
+     print.thres=TRUE)
+```
+
+训练集的ROC曲线怎么画呢？
+
+```{r,message=FALSE,collapse=TRUE,fig.asp=1}
+# 也是先计算预测概率
+pred_train <- predict(fit1, newdata = train, type = "prob")
+
+library(pROC)
+# 提供真实结果，预测概率
+rocc <- roc(train$diabetes, as.matrix(pred_train)[,1])
+rocc
+
+plot(rocc, 
+     print.auc=TRUE, 
+     auc.polygon=TRUE, 
+     max.auc.polygon=TRUE, 
+     auc.polygon.col="skyblue", 
+     grid=c(0.1, 0.2), 
+     grid.col=c("green", "red"), 
+     print.thres=TRUE)
+```
+
+训练集的AUC是1，但测试集的AUC只有0.84，严重的过拟合，随机森林本身就是容易过拟合的模型，它的各种超参数也都是降低模型复杂度，防止过拟合的。
+
+随机森林的网格搜索超参数调优可以通过`caret`、`mlr3`、`tidymodels`实现，`caret`法之前已介绍过，可参考：[R语言机器学习caret-10：随机森林的小例子](https://mp.weixin.qq.com/s/tnITiARh2MbW49VfB5u71A)
+
+## 超参数调优
+
+`randomForest`自带一个调优函数：`tuneRF()`，可以实现对`mtry`的调优：
+
+```{r}
+#?tuneRF
+tuneRF(x = train[,-9], y = train$diabetes)
+```
+
+结果如上图。
+
+轻量化的调参我还是推荐使用`e1071`包实现。
+
+其中的`tune.randomForest()`可实现对随机森林中`mtry`、`nodesize`、`ntree`3个超参数的调节，默认使用10折交叉验证法。
+
+- `mtry`：每次分支时使用的预测变量数量，肯定是介于 1个~预测变量个数，之间
+- `nodesize`：终末节点的样本量，如果这个数量特别大，那肯定树的深度就不会很深，可以防止过拟合
+- `ntree`：使用的树的数量，对于随机森林来说这个数量肯定是越多越好，通常选500或1000
+
+```{r,eval=FALSE}
+library(e1071)
+
+tune_res <- tune.randomForest(x = train[,-9], y = train$diabetes,
+                  nodesize = c(1:3),
+                  mtry = c(2,4,6,8),
+                  ntree = 500
+                  )
+#save(tune_res,file = "datasets/tune_res.rdata")
+```
+
+```{r}
+load(file = "datasets/tune_res.rdata")
+tune_res
+```
+
+查看错误率：
+
+```{r}
+tune_res$performances
+```
+
+最小错误率：
+
+```{r}
+tune_res$best.performance
+```
+
+最好的模型：
+
+```{r}
+tune_res$best.model
+```
+
+有了这个结果你就可以像上文一样，使用最好的超参数重新拟合模型了。
+
+:::{.callout-note}
+随机森林由于是集合了多棵树的集成模型，所以它天生就是一个容易过拟合的模型，基本上它的调优思路就是限制模型复杂度，防止模型过拟合。它的很多参数都可以显示模型复杂度，比如树的数量、节点样本数、分支样本数等，调优时多个限制复杂度的参数不需要同时调整，只需要选择其中1~2个即可。
+:::
+
+## 其他
+
+除此之外，`randomForest`还可以进行：
+
+- 缺失值插补：`rfImpute()`和`na.roughfix`
+- 异常值检测：`outlier()`
+
+大家自己探索下即可。
+
+后台回复**随机森林**可获取相关推文合集，回复**caret**、**mlr3**、**tidymodels**也可获取相关推文合集。
+
+

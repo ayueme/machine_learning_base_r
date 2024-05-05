@@ -1,0 +1,110 @@
+---
+title: "lightGBM"
+---
+
+lightGBM是由微软在2017年提出的算法，是一个快速的、分布式的、高性能的梯度提升框架，基于决策树算法，可用于排序、分类、以及许多其他机器学习任务。本质上还是一种集成算法，也是GBDT的一种改进方法，和xgboost有诸多相似之处，也有很多独特的优势。
+
+其主要优势有：
+
+- 更快的训练速度和更高的效率；
+- 降低内存使用率；
+- 更好的准确性；
+- 支持并行化；
+- 能够处理大规模数据
+
+目前在R语言中实现lightgbm可以通过`lightgbm`包。`lightgbm`包在设计时参考了`xgboost`，所以在使用方面二者有很多相似之处（可以说是一模一样！）。
+
+## 安装
+
+```{r,eval=FALSE}
+install.packages("lightgbm")
+```
+
+`lightgbm`是支持GPU的，如果要使用GPU，可以按照官方教程进行配置：https://lightgbm.readthedocs.io/en/latest/R/index.html#installing-a-gpu-enabled-build
+
+我们这里就不演示了。
+
+## 快速上手
+
+加载R包和数据。
+
+```{r}
+library(lightgbm)
+
+data(bank, package = "lightgbm")
+dim(bank)
+
+bank[1:5, c("y", "age", "balance")]
+
+# 结果变量
+table(bank$y)
+```
+
+这是一个2分类数据，共有4521行，17列。
+
+然后就是训练模型了。由于参考了`xgboost`的设计思路，所以使用上真的和xgboost太像了，部分细节这里不再重复说了，可以参考之前的推文：[R语言xgboost快速上手](https://mp.weixin.qq.com/s/f7J1To_Cj3u5D3dM-F6YTg)
+
+`lightgbm`提供了2个函数用于训练模型,其中`lightgbm()`是`lgb.train()`的轻量化实现，这个特性和`xgboost`是一模一样的，而且各种参数的名字也基本上一样的。
+
+在支持的格式上，也是和`xgboost`保持一致，只支持`x/y`接口，不支持R语言中经典的公式接口。
+
+预测变量要么是矩阵，要么是专门为`lightgbm`开发的`lgb.Dataset`。结果变量需要改为数值型，不能是因子型或者字符型。
+
+下面是使用`lightgbm()`训练模型的示例：
+
+```{r}
+y <- as.numeric(bank$y == "yes")
+X <- data.matrix(bank[, c("age", "balance")]) # 只选了2个自变量
+
+# 训练
+fit <- lightgbm(
+  data = X
+  , label = y
+  , params = list(
+    num_leaves = 4L
+    , learning_rate = 1.0
+    , objective = "binary"
+  )
+  , nrounds = 10L
+  , verbose = -1L
+)
+
+# 训练结果
+summary(predict(fit, X))
+```
+
+除此之外，`lightgbm`的专用格式可以通过`lgb.Dataset()`进行包装。包装后就可以使用`lgb.train()`进行训练了，它的`params`参数也是接受一个列表：
+
+```{r}
+# 专用格式
+dtrain <- lgb.Dataset(X, label = y)
+
+# 参数设置
+params <- list(
+  objective = "binary"
+  , num_leaves = 4L
+  , learning_rate = 1.0
+)
+
+# 训练模型
+fit <- lgb.train(
+  params
+  , data = dtrain
+  , nrounds = 10L
+  , verbose = -1L
+)
+```
+
+lightgbm的超参数非常多，大家可以参考官方文档，大部分参数都和xgboost差不多，也可以参考之前的关于xgboost的推文。
+
+- [R语言xgboost快速上手](https://mp.weixin.qq.com/s/f7J1To_Cj3u5D3dM-F6YTg)
+- [R语言xgboost超参数调优](https://mp.weixin.qq.com/s/dBXgGGsEsGhKmfFIITlTSw)
+- [R语言lightgbm超参数调优](https://mp.weixin.qq.com/s/jICU30gQlWFbtXR7tHjClA)
+
+这个包和`xgboost`真的是一模一样，我就不多介绍了，大家结合之前的xgboost的推文，自己了解下吧。
+
+## 推荐学习资源
+
+1. lightgbm官方文档：https://lightgbm.readthedocs.io/en/latest/index.html
+2. lightgbm中文文档：https://lightgbm.apachecn.org/#/docs/6
+

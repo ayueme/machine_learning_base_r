@@ -1,0 +1,427 @@
+---
+title: "数据预处理"
+---
+
+数据预处理对获得表现良好的模型有非常重要的作用！
+
+**是金子总会发光**，一个未经雕琢的数据，本身的价值也难以得到体现，通过数据预处理，可以让数据展现真正的价值；另外，不同的模型对数据有不同的要求，通过预处理可以让数据符合算法的要求，这样也能提高模型的预测能力。这就是数据预处理的重要作用！
+
+一个本身就没有什么价值的数据，再好的模型也得不出理想的结果，这就是我常说的：**鸭子是不会变成天鹅的！** 
+
+但是要注意，数据预处理不是单纯的数字操作，一定要结合自己的实际情况！在对数据进行预处理前，你必须对自己的数据有基本的了解，也要对自己使用的模型有一定的了解。
+
+今天给大家介绍一些临床预测模型和机器学习常用的数据预处理方法。
+
+>最有效的数据预处理的方法来自于建模者对数据的理解，而不是通过任何数学方法。-《应用预测建模》
+
+## 加载R包和数据
+
+这里使用细胞分离数据进行演示。这是一个分类数据，结果变量是二分类的，预测变量有连续型，也有分类型。
+
+```{r}
+library(AppliedPredictiveModeling)
+library(caret)
+
+data("segmentationOriginal")
+
+segData <- subset(segmentationOriginal, Case == "Train")
+cellID <- segData$Cell
+calss <- segData$Class
+case <- segData$Case
+segData <- segData[ ,  -(1:3)]
+statusColNum <- grep("Status", names(segData))
+statusColNum
+
+segData <- segData[ , -statusColNum]
+
+# 查看数据结构
+str(segData)
+```
+
+## 中心化和标准化
+
+某些算法对预测变量是有要求的，比如需要预测变量具有相同的尺度，如果有的预测变量范围是0.1~0.2，但是有的却是10000~20000，这种变量间的巨大差距会影像某些模型的稳定性，所以需要想办法把它们变成差不多的范围。
+
+中心化和标准化可以解决这样的问题。
+
+**中心化是将所有变量减去其均值，其结果是变换后的变量均值为0；标准化是将每个变量除以其自身的标准差，标准化迫使变量的标准差为1。**
+
+R语言中`scale()`函数可实现中心化和标准化，比如对演示数据的第1列和第4列进行中心化和标准化：
+
+```{r}
+# 进行中心化，不进行标准化
+scaled <- scale(segData[,c(1,4)], center = T, scale = F)
+head(scaled)
+
+# 同时进行中心化和标准化
+scaled <- scale(segData[,c(1,4)], center = T, scale = T)
+head(scaled)
+```
+
+## 偏度问题
+
+无偏分布类似我们常说的正态分布，有偏分布又分为右偏和左偏，分别类似正偏态分布和负偏态分布。
+
+**一个判断数据有偏的黄金标准：如果最大值与最小值的比例超过20，那么我们认为数据有偏。**
+
+可以通过计算**偏度统计量**来衡量偏度。如果预测变量分布是大致对称的，那么偏度将接近于0，右偏分布偏度大于0，越大说明偏的越厉害；左偏分布偏度小于0，越小说明偏的越厉害。
+
+计算偏度的包很多。
+
+使用`e1071`包查看变量的偏度
+
+```{r}
+# 查看偏度
+e1071::skewness(segData$AngleCh1)
+## [1] -0.02426252
+
+# 查看每一列的偏度
+skewValues <- apply(segData, 2, e1071::skewness)
+head(skewValues)
+```
+
+也可以通过`psych`包查看：
+
+```{r}
+psych::skew(segData$AngleCh1) # 偏度
+
+psych::kurtosi(segData$AngleCh1) # 峰度
+```
+
+通过对数据进行变换可以一定程度解决偏度的问题，常用的方法有：**取对数(log)，平方根，倒数，Box&Cox法等**。
+
+log、平方根、倒数这些很简单，就不演示了，下面演示下`BoxCox`变换。
+
+```{r}
+# 准备对数据进行BoxCox变换
+Ch1AreaTrans <- BoxCoxTrans(segData$AreaCh1)
+Ch1AreaTrans
+
+# 进行变换
+AreaCh1_transed <- predict(Ch1AreaTrans, segData$AreaCh1)
+
+# 查看变换前、后的数据
+head(segData$AreaCh1)
+head(AreaCh1_transed)
+```
+
+这里可以看到`caret`对数据预处理的方式，**首先是选择方法，然后使用`predict()`函数把变换应用到具体的变量上**。这是`caret`的基本操作，大家一定要记住！
+
+对于变换前后的数据变化，只看数字没有直观的感受，下面给大家画图演示。
+
+```{r}
+# 画图看变换前后
+opar <- par(mfrow=c(1,2))
+hist(segData$AreaCh1)
+hist(AreaCh1_transed)
+par(opar)
+```
+
+可以明显看到变换前是右偏分布，变换后基本接近无偏，可以再次计算偏度看看：
+
+```{r}
+psych::skew(AreaCh1_transed)
+```
+
+下面是`BoxCox`变换的一点点扩展，不看也影响不大。
+
+`BoxCox`变换需要一个参数`lambda`，这个参数需要我们计算并指定，如上使用`caret`进行变换时，它会自动帮我们处理好，其中一句代码显示`Estimated Lambda: -0.9`，也就是`lambda=0.9`。
+
+还有很多R包可以实现`BoxCox`变换，其中比较简单的是`forecast`，简单演示如下：
+
+```{r}
+library(forecast)
+
+best.lambda <- BoxCox.lambda(segData$AreaCh1) # 计算lambda
+best.lambda
+
+AreaCh1.transformed <- BoxCox(segData$AreaCh1, lambda = best.lambda) # 变换
+head(AreaCh1.transformed)
+
+y0 <- InvBoxCox(AreaCh1.transformed,lambda=best.lambda) # 还原
+```
+
+## 解决离群值
+
+离群值其实是有明确定义的，**通常我们会选择直接删除离群值**，但是还是要根据实际情况来看，有的离群值是非常有意义的，这样的离群值不能直接删除。
+
+- 有的离群值可能是数据录入时不小心输错了，比如错把收缩压132mmHg录成了-132mmHg，只需要改正即可；
+- 在样本量较小时，不宜直接删除离群值，有的离群值可能是因为数据来自一个明显有偏的分布，只是因为我们的样本量太小无法观测到这个偏度；
+- 有些离群值可能来自一个特殊的子集，只是这个子集才刚开始被收集到。
+
+有些模型对离群值很敏感，比如线性模型，这样是需要处理的，一个常见的方法是**空间表示变换**，该变换将预测变量取值映射到高纬的球上，它会把所有样本变换到离球心相等的球面上。在`caret`中可以实现。关于它的具体数学运算过程，感兴趣的自己了解即可。
+
+**在进行空间表示变换前，最好先进行中心化和标准化**，这也和它的数学计算有关。
+
+```{r}
+# 变换前的图形
+data(mdrr)
+transparentTheme(trans = .4)
+
+plotSubset <- data.frame(scale(mdrrDescr[, c("nC", "X4v")])) 
+xyplot(nC ~ X4v,
+       data = plotSubset,
+       groups = mdrrClass, 
+       auto.key = list(columns = 2))
+```
+
+```{r,fig.asp=1}
+# 变换后的图形
+transformed <- spatialSign(plotSubset)
+transformed <- as.data.frame(transformed)
+xyplot(nC ~ X4v, 
+       data = transformed, 
+       groups = mdrrClass, 
+       auto.key = list(columns = 2)) 
+```
+
+是不是很神奇？
+
+## 降维和特征提取
+
+有很多方法，比如PCA，ICA，PLS，UMAP等，最流行的还是PCA，主要是它给出的主成分是彼此不相关的，这恰好符合一些模型的需求。
+
+对数据进行PCA变换之前，最好先解决偏度问题，然后进行中心化和标准化，和它的数学计算过程有关，感兴趣的自己了解。
+
+可视化前后不同：
+
+```{r}
+# 主成分分析，可参考我之前的推文
+pr <- prcomp(~ AvgIntenCh1 + EntropyIntenCh1, 
+             data = segData, 
+             scale. = TRUE)
+
+# 可视化前后图形
+library(ggplot2)
+
+p1 <- ggplot(segData, aes(AvgIntenCh1,EntropyIntenCh1))+
+  geom_point()+
+  labs(x="Channel 1 Fiber Width",y="Intensity Entropy Channel 1")+
+  theme_bw()
+p2 <- ggplot(as.data.frame(pr$x), aes(PC1,PC2))+
+  geom_point()+
+  theme_bw()
+cowplot::plot_grid(p1,p2)
+```
+
+如果你要对结果进行解释，那么不推荐使用降维，因为降维后得到的模型很难解释！尤其是对于医学来说，我们不喜欢不确定的东西。
+
+## 处理缺失值
+
+处理缺失值主要有两种方法，直接删除或者进行插补，使用哪种方法应取决于对数据的理解！
+
+一些常见的缺失值处理方法可以参考我之前的推文：[我常用的缺失值插补方法](https://mp.weixin.qq.com/s/L7a1CTqkndYcpmszNReucg)
+
+## 过滤
+
+这里的过滤和解决共线性，其实部分属于**特征选择**的范围，就是大家常见的自变量选择问题，这个问题在以后的推文中还会详细介绍。
+
+>冗余的变量通常增加了模型的复杂度而非信息量
+
+主要是过滤两种变量：**(近)零方差变量**和**高度相关变量**。
+
+如果一个变量只有1个值，那么这个变量的方差为0；如果一个变量只有少量不重复的取值，这种变量称为近零方差变量；这2种变量包含的信息太少了，应当过滤；
+
+检测近零方差变量的准则是：
+
+- 不重复取值的数目与样本量的比值低（比如10%）；
+- 最高频数和次高频数的比值高（比如20%）
+
+如果两个变量相关性太高，那么它们携带的信息可能很多是重叠的，会对某些模型产生较大的影响，应当解决。
+
+移除共线变量的方法如下：
+
+1. 计算预测变量的相关系数矩阵
+2. 找出相关系数绝对值最大的那对预测变量（记为变量A和B）
+3. 分别计算A和B和其他预测变量的相关系数
+4. 如果A的平均相关系数更大，移除A，否则移除B
+5. 重复步骤2-4，直至所有相关系数的绝对值都低于设定的阈值
+
+`caret`可以轻松实现以上过程。
+
+使用`mdrr`数据集演示。其中一列`nR11`大部分都是501，这种变量方差是很小的！
+
+```{r}
+data(mdrr)
+table(mdrrDescr$nR11) # 大部分值都是0
+
+sd(mdrrDescr$nR11)^2 # 方差很小！
+```
+
+使用`nearZeroVar()`找出零方差和近零方差变量，结果中会给出`zeroVar`和`nzv`两列，用逻辑值表示是不是近零方差变量或者零方差变量。
+
+```{r}
+nzv <- nearZeroVar(mdrrDescr, saveMetrics= TRUE)
+nzv[nzv$nzv,][1:10,]
+```
+
+去掉近零方差变量：
+
+```{r}
+dim(mdrrDescr)
+
+nzv <- nearZeroVar(mdrrDescr)
+filteredDescr <- mdrrDescr[, -nzv]
+dim(filteredDescr)
+```
+
+下面是处理高度相关的变量。
+
+```{r}
+# 相关系数矩阵
+correlations <- cor(segData)
+dim(correlations)
+
+# 可视化相关系数矩阵，中间几个颜色深的就是高度相关的变量
+library(corrplot)
+corrplot(correlations, order = "hclust",tl.col = "black")
+```
+
+去掉高度相关的变量：
+
+```{r}
+# 阈值设为0.75
+highCorr <- findCorrelation(correlations, cutoff = 0.75)
+length(highCorr)
+head(highCorr)
+
+# 去掉高度相关的变量
+filteredSegData <- segData[, -highCorr]
+```
+
+## 共线性
+
+假设一个下面这种的数据，其中第2列和第3列的值加起来和第1列一样，第4,5,6列的值起来也和第1列一样。这种数据的某些变量间是有高度共线性的。
+
+```{r}
+ltfrDesign <- matrix(0, nrow=6, ncol=6)
+ltfrDesign[,1] <- c(1, 1, 1, 1, 1, 1)
+ltfrDesign[,2] <- c(1, 1, 1, 0, 0, 0)
+ltfrDesign[,3] <- c(0, 0, 0, 1, 1, 1)
+ltfrDesign[,4] <- c(1, 0, 0, 1, 0, 0)
+ltfrDesign[,5] <- c(0, 1, 0, 0, 1, 0)
+ltfrDesign[,6] <- c(0, 0, 1, 0, 0, 1)
+
+ltfrDesign
+```
+
+`findLinearCombos()`可以通过算法给出需要去除的变量，关于具体的方法可以官网查看。
+
+```{r}
+comboInfo <- findLinearCombos(ltfrDesign)
+comboInfo
+```
+
+结果给出了需要去除的变量是第3列和第6列。
+
+```{r}
+# 去除第3列和第6列
+ltfrDesign[, -comboInfo$remove]
+```
+
+## 构建虚拟变量
+
+最常见的回归分析中的哑变量设置，可以参考之前的推文，详细介绍了常见的分类变量的编码方式：[分类变量进行回归分析时的编码方案](https://mp.weixin.qq.com/s/8j0e3-PpbvTqGDnkPWRFyA)
+
+这里介绍下独热编码（one-hot encoding），和哑变量编码稍有不同，哑变量是变成k-1个变量，独热编码是变成k个变量。
+
+使用以下数据进行演示
+
+```{r}
+data("cars", package = "caret")
+head(cars)
+
+type <- c("convertible", "coupe", "hatchback", "sedan", "wagon")
+cars$Type <- factor(apply(cars[, 14:18], 1, function(x) type[which(x == 1)]))
+
+carSubset <- cars[sample(1:nrow(cars), 20), c(1, 2, 19)]
+
+# 上面是数据生成过程，不重要，记住下面这个数据的样子即可！！
+head(carSubset)
+levels(carSubset$Type) # Type是一个因子型变量
+```
+
+现在把`Type`这个变量进行独热编码。
+
+使用`dummyVars`构建虚拟变量：
+
+```{r}
+simpleMod <- dummyVars(~Mileage + Type, # 用mileage和Type对价格进行预测
+                       data = carSubset,
+                       levelsOnly = TRUE) # 从列名中移除因子变量的名称
+simpleMod
+```
+
+接下来就可以使用`predict`和`simpleMod`对训练集进行生成虚拟变量的操作了：
+
+```{r}
+predict(simpleMod, head(carSubset))
+```
+
+可以看到`Type`变量没有了，完成了虚拟变量的转换。
+
+假如你认为车型和里程有交互影响，则可以使用`:`表示：
+
+```{r}
+withInteraction <- dummyVars(~Mileage + Type + Mileage:Type,
+                             data = carSubset,
+                             levelsOnly = TRUE)
+withInteraction
+```
+
+应用于新的数据集：
+
+```{r}
+predict(withInteraction, head(carSubset))
+```
+
+## 区间化预测变量
+
+主要是为了好解释结果，比如把血压分为高血压1级、2级、3级，把贫血分为轻中重极重等，这样比如你做logistic回归，可以说血压每增高一个等级，因变量的风险增加多少，但是你如果说血压值每增加1mmHg，因变量增加多少倍，这就有点扯了。
+
+## 多个预处理步骤放一起
+
+在`caret`中是通过`preProcess()`函数里面的`method`参数实现的，把不同的预处理步骤按照顺序写好即可。
+
+```{r}
+library(AppliedPredictiveModeling)
+data(schedulingData)
+str(schedulingData)
+
+# 中心化、标准化、YeoJohnson变换
+pp_hpc <- preProcess(schedulingData[, -8], 
+                     method = c("center", "scale", "YeoJohnson"))
+pp_hpc
+
+# 应用于数据
+transformed <- predict(pp_hpc, newdata = schedulingData[, -8])
+head(transformed)
+
+mean(schedulingData$NumPending == 0)
+
+# 进行中心化、标准化、YeoJohnson、nzv
+pp_no_nzv <- preProcess(schedulingData[, -8], 
+                        method = c("center", "scale", "YeoJohnson", "nzv"))
+pp_no_nzv
+
+predict(pp_no_nzv, newdata = schedulingData[1:6, -8])
+```
+
+如果你用过`tidymodels`，那你应该知道里面的数据预处理步骤是通过`recipes`包完成的，每一步都是`step_xx`，说实话我觉得`caret`的这种方式更加简洁易懂！
+
+以上就是数据预处理的一般过程，一个`caret`包可以解决上面所有的问题，有兴趣的小伙伴可以自行学习。
+
+数据预处理是一个非常系统且专业的过程，如同开头说的那样：**最有效的编码数据的方法来自于建模者对数据的理解，而不是通过任何数学方法**，在对数据进行预处理之前，一定要仔细理解自己的数据哦，结果导向的思维是不对的哦！
+
+本文简单介绍了常见的数据预处理方法和简单的实现方法，目前在R中实现数据预处理是非常方便的，这部分内容可参考：
+
+- [mlr3数据预处理](https://mp.weixin.qq.com/s/w122H-CuQbK7vXhF_KQh-g)
+- [tidymodels菜谱：数据预处理](https://mp.weixin.qq.com/s/DPUAFApls8MhHG2fK4jfQw)
+- [R语言机器学习caret-02：数据预处理](https://mp.weixin.qq.com/s/A5CrI7S8NgMtSS4OrNnBZg)
+
+## 推荐的预处理步骤
+
+以下是不同算法推荐的预处理步骤，参考自：tidymodeling with R
+
+![](figs/PixPin_2024-04-27_13-20-37.png)
+

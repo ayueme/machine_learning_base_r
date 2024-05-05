@@ -1,0 +1,92 @@
+project:
+  type: book
+  output-dir: _book
+
+knitr: 
+  opts_chunk: 
+    collapse: true
+
+book:
+  title: "R语言实战机器学习"
+  author: "阿越就是我"
+  date: last-modified
+  date-format: iso
+  
+  page-footer:
+    left: |
+      R语言实战机器学习 was written by 阿越.
+    right: |
+      本书由 <a href="https://quarto.org/">Quarto</a> 强力驱动.
+  #cover-image: cover.png
+  #favicon: cover.png
+  site-url: https://ayueme.github.io/R_machine_learning/
+  repo-url: https://github.com/ayueme/R_machine_learning
+  repo-branch: main
+  repo-actions: [edit, issue]
+  
+  chapters: 
+    - index.qmd
+    
+    - part: "基础知识"
+      chapters: 
+        - 机器学习简介.qmd
+        - 数据预处理.qmd
+        - 数据划分.qmd
+        - 模型评价.qmd
+        - 超参数调优简介.qmd
+        - 变量选择.qmd
+        
+    - part: "代码实战"
+      chapters: 
+        - 数据准备.qmd
+        - 聚类分析.qmd
+        - 主成分分析.qmd
+        - 主成分分析可视化.qmd
+        - 多元线性回归.qmd
+        - 逻辑回归.qmd
+        - glmnet.qmd
+        - KNN.qmd
+        - 支持向量机.qmd
+        - 支持向量机核函数比较.qmd
+        - 决策树.qmd
+        - 决策树可视化.qmd
+        - 集成算法类型.qmd
+        - 随机森林.qmd
+        - gbm.qmd
+        - xgboost.qmd
+        - lightGBM.qmd
+        - catboost.qmd
+
+  appendices: 
+    - 9999-appendix.qmd
+
+format:
+  html:
+    theme: cosmo
+    code-copy: true
+  pdf:
+    documentclass: scrbook
+    toc: true
+    toc-depth: 2
+    toc-title: 目录
+    number-sections: true
+    number-depth: 3
+    linkcolor: highlight
+    colorlinks: true
+    highlight-style: github
+    code-block-bg: light
+    code-block-border-left: false
+    fontsize: 12pt
+    #设置4个边距
+    geometry:
+      - top=2.5cm
+      - bottom=2.5cm
+      - left=2.0cm
+      - right=2.0cm
+      - heightrounded
+      - ignorehead
+      - ignorefoot
+    include-in-header: preamble.tex
+  
+  
+

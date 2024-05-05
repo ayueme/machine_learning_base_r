@@ -1,0 +1,190 @@
+---
+title: "lightGBM超参数调优"
+---
+
+在R中对lightgbm进行超参数调优可以通过`tidymodels`或者`mlr3`实现，这里简单说下如果通过`tidymodels`实现。其实这和其他算法并没有什么不同，只不过是换个“引擎”而已。
+
+要想得到更好的结果，关键还是看你对自己数据的理解以及对算法本身的理解。不管是`tidymodels`还是`mlr3`都只是一种实现工具而已。
+
+`tidymodels`中的超参数调优的方法很少，目前只支持网格搜索、贝叶斯优化、模拟退火3种方法。其中模拟退火需要额外安装`finetune`包才可实现。
+
+注意通过`tidymodels`实现`lightgbm`需要额外安装`bonsai`包。
+
+## 加载R包和数据
+
+加载R包和数据，这是一个3分类的数据，其中`species`是结果变量，因子型，其余变量是预测变量：
+
+```{r,warning=FALSE,message=FALSE}
+library(tidymodels)
+library(bonsai)
+library(modeldata)
+library(ggplot2)
+
+data("penguins")
+str(penguins)
+```
+
+之前我们也介绍过，`tidymodels`支持的模型真的很有限，比如常见的`lightGBM`它就不支持。。。对于提升树模型，它目前只支持以下5个引擎：
+
+```{r}
+# 加载bonsai之后是7个
+show_engines('boost_tree')
+```
+
+除此之外，`catboost`目前还是不支持的，之前的`treesnip`同时支持`catboost`和`lightGBM`，但是现在`treesnip`已经停止维护了，并被`bonsai`取代，但是`bonsai`目前并不支持`catboost`（因为catboost目前并不在CRAN）。官方说大概3个月后支持`catboost`（现在是20231115）。
+
+## 模型设定
+
+```{r}
+bt_light <- boost_tree(trees = 1000, mtry = tune(), tree_depth = tune(),  
+                       learn_rate = tune(), min_n = tune(), 
+                       loss_reduction = tune()) %>%
+  set_engine("lightgbm",objective = "multiclass",num_class=3) %>%
+  set_mode("classification")
+
+bt_light
+```
+
+## 建立工作流
+
+```{r}
+bt_wf <- workflow() %>% 
+  add_formula(species ~ .) %>% 
+  add_model(bt_light)
+bt_wf
+```
+
+## 网格设定
+
+选择一个简单的拉丁超立方网格：
+
+```{r}
+set.seed(123)
+tree_grid <- grid_max_entropy(mtry(range = c(2L, 6L)),
+                          tree_depth(),
+                          learn_rate(),
+                          min_n(),
+                          loss_reduction(),
+                          size = 15 # 只产生15个模型配置
+                          )
+#tree_grid
+```
+
+## 数据划分
+
+数据划分选择3折交叉验证，我这里并没有划分训练集测试集，有需要的自己分一下即可：
+
+```{r}
+set.seed(123)
+bt_folds <- vfold_cv(penguins, v=3)
+bt_folds
+```
+
+## 开始调参
+
+```{r,eval=FALSE}
+set.seed(123)
+bt_tune <- tune_grid(bt_wf,
+                     bt_folds,
+                     grid = tree_grid,
+                     control = control_grid(save_pred = T,verbose = F)
+                     )
+#save(bt_tune,file = "../000机器学习/bt_tune.rdata")
+```
+
+## 结果探索
+
+查看训练结果：
+
+```{r}
+load(file = "../000机器学习/bt_tune.rdata")
+
+bt_tune %>% collect_metrics()
+```
+
+结果可视化：
+
+```{r}
+autoplot(bt_tune)
+```
+
+查看预测结果：
+
+```{r}
+bt_tune %>% 
+  collect_predictions()
+```
+
+画个3分类的ROC曲线(不会的可参考历史推文)：
+
+```{r}
+bt_tune %>% 
+  collect_predictions() %>% 
+  roc_curve(species, .pred_Adelie:.pred_Gentoo) %>% 
+  ggplot(aes(1 - specificity, sensitivity, color = .level)) +
+  geom_abline(lty = 2, color = "gray80", linewidth = 1.5) +
+  geom_path(alpha = 0.8, linewidth = 1) +
+  coord_equal() +
+  labs(color = NULL)
+```
+
+也可以使用`autoplot`：
+
+```{r}
+bt_tune %>% 
+  collect_predictions() %>% 
+  roc_curve(species, .pred_Adelie:.pred_Gentoo) %>% 
+  autoplot()
+```
+
+绘制混淆矩阵：
+
+```{r}
+bt_tune %>% 
+  collect_predictions() %>%
+  conf_mat(species, .pred_class) %>%
+  autoplot()
+```
+
+查看表现最好的超参数：
+
+```{r}
+bt_best <- bt_tune %>% 
+  select_best("roc_auc")
+
+bt_best
+```
+
+## 重新拟合
+
+选择最好的参数，重新拟合模型
+
+```{r}
+bt_fit <- bt_wf %>% 
+  finalize_workflow(bt_best) %>% 
+  fit(penguins)
+bt_fit
+```
+
+查看变量重要性：
+
+```{r}
+library(vip)
+
+bt_fit %>% 
+  extract_fit_parsnip() %>%
+  vip()
+```
+
+预测新的数据：
+
+```{r}
+new_data <- head(penguins)
+
+predict(bt_fit, new_data = new_data)
+```
+
+一套打完，结束！
+
+对`tidymodels`各种用法还不熟悉的可在后台会回复**tidymodels**获取相关合集。回复**lightgbm**可获取相关推文合集。
+

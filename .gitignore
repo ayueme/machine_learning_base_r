@@ -1,0 +1,10 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.quarto
+.qmd
+xgboost_files
+catboost_info
+
+/.quarto/

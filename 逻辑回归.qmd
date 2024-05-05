@@ -1,0 +1,434 @@
+---
+title: "逻辑回归"
+---
+
+逻辑回归（logistic regression）属于概率型非线性回归，它是研究二分类(可扩展到多分类)观察结果与一些影响因素之间关系的一种多变量分析方法。在流行病学研究中，经常需要分析疾病与各危险因素之间的定量关系，如食管癌的发生与吸烟、饮酒、不良饮食习惯等危险因素的关系，为了正确说明这种关系，需要排除一些混杂因素的影响。传统上常使用Mantel-Haenszel分层分析方法，但这一方法适用于样本含量大、分析因素较少的情况。如果用线性回归分析，由于应变量Y是一个二值变量（通常取值为1或0），不满足应用条件，尤其当各因素都处于低水平或高水平时，预测值值可能超出0~1范围，出现不合理的现象。用logistic回归分析则可以较好地解决上述问题。
+
+虽然被称为回归，但是逻辑回归其实是一种分类方法！当涉及到机器学习时，逻辑回归使用的比较少，因为有太多更加优秀的算法可以选择，但是它很经典，在临床预测模型中几乎是肯定会有的，所以我这里简单说一下。
+
+## 二项逻辑回归
+
+R语言中的`factor()`函数可以把变量变为因子类型，默认是没有等级之分的（可以理解为无序分类变量，nominal）！当然也可以通过添加参数`ordered=T`变成有序因子（等级资料，有序分类，ordinal）。
+
+因变量是二分类变量时，可以使用二项逻辑回归（binomial logistic regression），自变量可以是数值变量、无序多分类变量、有序多分类变量。
+
+本次数据使用孙振球版《医学统计学》第4版**例16-2**的数据，直接读取。
+
+为了探讨冠心病发生的危险因素，对26例冠心病患者和28例对照者进行病例-对照研究，试用逻辑回归筛选危险因素。
+
+```{r}
+df16_2 <- foreign::read.spss("datasets/例16-02.sav", 
+                             to.data.frame = T,
+                             use.value.labels = F,
+                             reencode  = "utf-8")
+
+str(df16_2)
+```
+
+数据一共11列，第1列是编号，第2-9列是自变量，第10列是因变量。
+
+具体说明：
+- x1：年龄，小于45岁是1,45-55是2,55-65是3,65以上是4；
+- x2：高血压病史，1代表有，0代表无；
+- x3：高血压家族史，1代表有，0代表无；
+- x4：吸烟，1代表吸烟，0代表不吸烟；
+- x5：高血脂病史，1代表有，0代表无；
+- x6：动物脂肪摄入，0表示低，1表示高
+- x7：BMI，小于24是1,24-26是2，大于26是3；
+- x8：A型性格，1代表是，0代表否；
+- y：是否是冠心病，1代表是，0代表否
+
+*这里的`x1~y`虽然是数值型，但并不是真的代表数字大小，只是为了方便标识*，进行了转换，因此在进行logistic回归之前，我们要把数值型变量变成无序分类或有序分类变量，在R语言中可以通过`factor()`函数变成因子型实现。
+
+```{r}
+# 变成因子型
+df16_2[,c(2:10)] <- lapply(df16_2[,c(2:10)], factor)
+str(df16_2)
+```
+
+需要注意的是自变量x1和x7，这两个应该是有序分类变量，这种自变量在进行逻辑回归时，可以进行哑变量设置，即给定一个参考，让其他所有组都和参考相比，比如这里，我们把x1变成因子型后，R语言在进行logistic回归时，会默认选择第一个为参考。
+
+接下来进行二项逻辑回归，**在R语言中，默认是以因子的第一个为参考的，不仅是自变量，因变量也是如此！** 和SPSS的默认方式不太一样。
+
+```{r}
+f <- glm(y ~ x1 + x2 + x3 + x4 + x5 + x6 + x7 + x8, 
+         data = df16_2, 
+         family = binomial())
+
+summary(f)
+```
+
+**结果详解：**
+
+`Deviance Residuals`:表示偏差残差统计量。在理想情况下应服从正态分布，均值应为0。
+
+在此例中，中位数的符号为负（-0.01406），表明整体向左偏移，中位数的大小表明偏移的程度。第一个四分位数（1Q）和第三个四分位数（3Q）为两侧“尾巴”分布的幅度。这里3Q大于1Q（绝对值），表明这个曲线是向右倾斜的。最大和最小残差可用来检验数据中的离群值。
+
+结果中`Estimate`是回归系数和截距，`Std. Error`表示回归系数的标准误，`z value`是统计量值（z的平方就是Wald值），`Pr(>|z|)`是P值。
+
+β值（这里就是Estimate）是指回归系数和截距（常数项），可以是负数（负相关时回归系数出现负值）；
+
+OR是比值比（odds ratio），OR = exp(β)，其取值范围是0至正无穷，不可能是负数；
+
+Wald是一个卡方值，等于β除以它的标准误（这里是Std. Error），然后取平方（也就是z值的平方），因此也不可能是负数。Wald用于对β值进行检验，考察β值是否等于0。若β值等于0，其对应的OR值，也就是Exp(β)为1，表明两组没有显著差异。Wald值越大，β值越不可能等于0。
+
+结果中出现了`x12/x13/x14`这种，这是因为R语言在做回归时，如果设置了哑变量，默认是以第一个为参考的，其余都是和第一个进行比较，这也是R中自动进行哑变量编码的方式。
+
+`Null deviance`:无效偏差（零偏差），`Residual deviance`:残差偏差，无效偏差和残差偏差之间的差异越大越好，用来评价模型与实际数据的吻合情况。
+
+AIC：赤池信息准则，表示模型拟合程度的好坏，AIC越低表示模型拟合越好。
+
+最后还有一个Fisher Scoring的迭代次数，这个和最大似然函数的计算有关。
+
+我们可以通过函数的方式分别获取模型信息。
+
+```{r}
+# β值
+coefficients(f)
+
+# β值
+coef(f)
+
+# β值的95%可信区间
+confint(f)
+
+# OR值
+exp(coef(f))
+
+# OR值的95%的可信区间
+exp(confint(f))
+```
+
+这里`x21`的`OR`值是2.346329320，代表：45~55岁的人群患冠心病的风险是小于45岁人群的2.346329320倍，但是这个结果并没有统计学意义！
+
+```{r}
+# Wald值
+summary(f)$coefficients[,3]^2
+
+# P值
+summary(f)$coefficients[,4]
+
+# 预测值
+fitted(f) # 或者 predict(f,type = "response")
+
+# 偏差
+deviance(f)
+
+# 残差自由度
+df.residual(f)
+
+# 伪R^2
+DescTools::PseudoR2(f, which = c("McFadden", "CoxSnell", "Nagelkerke"))
+```
+
+这里需要说明以下`fitted(f)`，也就是`predict(f,type = "response")`得到的结果是*预测概率*，范围是0-1之间的。
+
+对于logistic回归来说，如果不使用`type`函数，默认是`type = "link"`，返回的是logit(P)的值。
+
+```{r,eval=FALSE}
+# 默认返回logit(P)的值
+predict(f)
+
+# 返回概率
+predict(f, type = "response")
+```
+
+模型整体的假设检验：
+
+```{r}
+# 先构建一个只有截距的模型
+f0 <- glm(y ~ 1, data = df16_2, family = binomial())
+
+# 原模型和这个空模型进行比较
+anova(f0,f,test="Chisq")
+```
+
+P<0.001，说明我们的模型是有意义的。
+
+逐步回归法的logistic回归，可以使用`step()`函数：
+
+```{r}
+# 向前
+f1 <- step(f, direction = "forward")
+summary(f1)
+
+# 向后
+f2 <- step(f, direction = "backward")
+summary(f2)
+
+# 步进法
+f3 <- step(f, direction = "both")
+summary(f3)
+```
+
+按照步进法最终纳入的自变量是x2,x6,x8。
+
+## 多项逻辑回归
+
+因变量是无序多分类资料（＞2）时，可使用多分类逻辑回归（multinomial logistic regression）。
+
+使用课本**例16-5**的数据，课本电子版及数据已上传到QQ群，自行下载即可。
+
+某研究人员欲了解不同社区和性别之间居民获取健康知识的途径是否相同，对2个社区的314名成人进行了调查，其中`X1`是社区，社区1用0表示，社区2用1表示；`X2`是性别，0是男，1是女，`Y`是获取健康知识途径，1是传统大众传媒，2是网络，3是社区宣传。
+
+```{r,include=FALSE,eval=FALSE}
+df.l <- data.frame(X1=rep(c(0,1),c(175,139)),
+                   X2=rep(c(0,1,0,1),c(81,94,85,54)),
+                   Y=rep(c(1,2,3,1,2,3,1,2,3,1,2,3),c(20,35,26,10,27,57,42,17,26,16,12,26))
+                   )
+
+write.csv(df.l, file = "例16-05.csv",quote = F,row.names = F)
+```
+
+```{r}
+df <- read.csv("datasets/例16-05.csv",header = T)
+
+psych::headtail(df)
+```
+
+首先变为因子型，无需多分类的逻辑回归需要对因变量设置参考，我们这里直接用`factor()`函数变为因子，这样在进行无序多分类的逻辑回归时默认是以第一个为参考。也可以使用`relevel()`重新设置参考。
+
+```{r}
+df$X1 <- factor(df$X1,levels = c(0,1),labels = c("社区1","社区2"))
+df$X2 <- factor(df$X2,levels = c(0,1),labels = c("男","女"))
+
+# 因变量设置参考，这里选择第1个（传统大众传媒）为参考
+df$Y <- factor(df$Y,levels = c(1,2,3),labels = c("传统大众传媒","网络","社区宣传"))
+
+str(df)
+```
+
+使用`nnet::multinom`进行无序多分类的逻辑回归：
+
+```{r}
+library(nnet)
+
+fit <- multinom(Y ~ X1 + X2, data = df, model = T)
+
+summary(fit)
+```
+
+可以看到结果比二项逻辑回归的结果简洁多了，少了很多信息，只给出了`Coefficients/Std. Errors/Residual Deviance/AIC`。
+
+不过也是两个模型的结果，分别是 *社区宣传 和 传统大众传媒* 比，*网络 和 传统大众传媒* 比。
+
+自变量的Z值（wald Z, Z-score）和P值需要手动计算:
+
+```{r}
+z_stats <- summary(fit)$coefficients/summary(fit)$standard.errors
+
+p_values <- (1 - pnorm(abs(z_stats)))*2
+
+p_values
+```
+
+但其实可以调包解决：
+
+```{r}
+res <- broom::tidy(fit)
+res
+```
+
+OR值及其95%的可信区间也没有给出来，需要手动计算OR值和可信区间：
+
+```{r}
+# 计算OR值
+OR <- exp(coef(fit))
+OR
+
+# 计算OR值的95%的可信区间
+OR.confi <- exp(confint(fit))
+OR.confi
+```
+
+模型整体的假设检验：
+
+```{r}
+# 先构建一个只有截距的模型
+fit0 <- multinom(Y ~ 1, data = df, model = T)
+
+# 两个模型比较,Likelihood ratio tests
+anova(fit0, fit)
+```
+
+P<0.001，模型具有统计学意义。
+
+获取模型预测的类别：
+
+```{r}
+pred <- predict(fit, df, type = "class")
+head(pred)
+```
+
+获取模型预测的概率：
+
+```{r}
+prob <- predict(fit, df, type = "probs") # 或者使用 fitted(fit)
+head(prob)
+```
+
+模型拟合优度的检验，这里使用卡方检验：
+
+```{r}
+chisq.test(df$Y, pred)
+```
+
+计算伪 R^2^：
+
+```{r}
+DescTools::PseudoR2(fit, which = "all")
+```
+
+不仅给出了伪R^2，还给出了超多的值，每一项的意义可以参考下面这张图：
+
+![](figs/Snipaste_2023-04-05_16-05-01.png)
+
+结果解读可以参考二项逻辑回归。
+
+## 有序逻辑回归
+
+ordinal logistic regression适用于因变量为等级资料。使用课本**例16-4**的数据。
+
+随机选取84例患者做临床试验，探讨性别和治疗方法对该病的影响。变量赋值为：性别（X1，男=0，女=1），治疗方法（X2，传统疗法=0，新型疗法=1），疗效（Y，无效=1，有效=2，痊愈=3）。
+
+```{r,include=FALSE,eval=FALSE}
+df.l <- data.frame(X1=rep(c(0,1),c(25,59)),
+                   X2=rep(c(0,1,0,1),c(11,14,32,27)),
+                   Y=rep(c(1,2,3,1,2,3,1,2,3,1,2,3),
+                         c(10,0,1,7,2,5,19,7,6,6,5,16)))
+write.csv(df.l, file = "例16-04.csv",quote = F,row.names = F)
+```
+
+
+```{r}
+df <- read.csv("datasets/例16-04.csv",header = T)
+psych::headtail(df)
+```
+
+变为因子型：
+
+```{r}
+# 因变量变为有序因子
+df$Y <- factor(df$Y, levels = c(1,2,3),
+               labels = c("无效","有效","痊愈"),
+               ordered = T)
+
+# 自变量变为无序因子
+df$X1 <- factor(df$X1,levels = c(0,1),labels = c("男","女"))
+df$X2 <- factor(df$X2,levels = c(0,1),labels = c("传统疗法","新型疗法"))
+
+str(df)
+```
+
+使用`MASS::polr`拟合有序逻辑回归：
+
+```{r}
+library(MASS)
+
+fit <- polr(Y ~ X1 + X2, data = df,Hess = TRUE,method = "logistic")
+summary(fit)
+```
+
+结果也是没有给出P值，手动计算P值：
+
+```{r}
+p <- pnorm(abs(coef(summary(fit))[, "t value"]),lower.tail = F)*2
+p
+```
+
+这次`broom::tidy(fit)`并没有直接给出P值：
+
+```{r}
+broom::tidy(fit)
+```
+
+OR值：
+
+```{r}
+OR <- exp(coef(fit))
+OR
+```
+
+平行线检验(Brant-Wald test)：
+
+```{r}
+brant::brant(fit)
+```
+
+P值>0.05，平行线检验通过，可以使用有序逻辑回归。
+
+模型整体的显著性检验：
+
+```{r}
+# 先构建一个只有截距的模型
+fit0 <- polr(Y ~ 1, data = df,Hess = TRUE,method = "logistic")
+
+# 两个模型比较
+anova(fit0, fit)
+```
+
+P值＜0.01，模型是有意义的。
+
+获取模型预测的类别：
+
+```{r}
+pred <- predict(fit, df, type = "class")
+head(pred)
+```
+
+获取模型预测的概率：
+
+```{r}
+prob <- predict(fit, df, type = "probs") # 或者使用 fitted(fit)
+head(prob)
+```
+
+模型拟合优度的检验，这里使用卡方检验：
+
+```{r}
+chisq.test(df$Y, pred)
+```
+
+计算伪R2：
+
+```{r}
+DescTools::PseudoR2(fit, which = "all")
+```
+
+## 条件逻辑回归
+
+conditional logistic regression是针对配对数据资料分析的一种方法。在一些病例-对照研究中，把病例和对照按照年龄、性别等进行配对，形成多个匹配组，各匹配组的病例数和对照数是任意的，并不是1个对1个，常用的是每组中有一个病例和多个对照，即1：M配对研究。
+
+使用课本**例16-3**的数据。某北方城市研究喉癌发病的危险因素，用1:2配对研究，现选取了6个可能的危险因素并记录了25对数据，试做条件逻辑回归。
+
+![](figs/Snipaste_2023-04-05_16-07-01.png)
+
+```{r}
+df <- foreign::read.spss("datasets/例16-03.sav",to.data.frame = T)
+psych::headtail(df)
+str(df)
+```
+
+`i`是配对的对子数，不需要变成因子型。
+
+使用`survival::clogit`进行条件逻辑回归：
+
+```{r}
+library(survival)
+
+fit <- clogit(y ~ x1+x2+x3+x4+x5+x6+strata(i), data = df, method = "exact")
+
+summary(fit)
+```
+
+结果非常齐全，β值，OR值，P值等信息都有了。
+
+## 参考资料
+
+1. https://blog.csdn.net/weixin_41744624/article/details/105506951
+2. https://zhuanlan.zhihu.com/p/113403422
+3. https://duanku.pai-hang-bang.cn/kuzi_1046977453210716059
+4. https://bookdown.org/chua/ber642_advanced_regression/
+5. https://peopleanalytics-regression-book.org/
+6. 孙振球版医学统计学第四版
+
