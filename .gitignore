@@ -3,8 +3,8 @@
 .RData
 .Ruserdata
 .quarto
-.qmd
-xgboost_files
-catboost_info
-
-/.quarto/
+*.qmd
+xgboost_files/
+catboost_info/
+_book/
+.quarto/
