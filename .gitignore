@@ -8,3 +8,5 @@ xgboost_files/
 catboost_info/
 _book/
 .quarto/
+
+/.quarto/
